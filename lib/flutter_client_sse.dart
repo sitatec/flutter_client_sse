@@ -27,6 +27,8 @@ class SSEClient {
   /// [maxRetry] is the maximum number of retries before giving up. if set to 0,
   /// it will retry indefinitely.
   /// [currentRetry] is the current retry count.
+  /// [limitReachedCallback] is a callback function that will be called when the
+  /// maximum number of retries is reached.
   ///
   static void _retryConnection(
       {required SSERequestType method,
@@ -37,11 +39,13 @@ class SSEClient {
       required int maxRetryTime,
       required int minRetryTime,
       required int maxRetry,
-      required int currentRetry}) {
+      required int currentRetry,
+      Future Function()? limitReachedCallback}) {
     _log.finest('$currentRetry retry of  $maxRetry retries');
 
     if (maxRetry != 0 && currentRetry >= maxRetry) {
       _log.info('---MAX RETRY REACHED---');
+      limitReachedCallback?.call();
       streamController.close();
       return;
     }
@@ -59,7 +63,8 @@ class SSEClient {
           maxRetryTime: maxRetryTime,
           minRetryTime: minRetryTime,
           maxRetry: maxRetry,
-          retryCount: currentRetry + 1);
+          retryCount: currentRetry + 1,
+          limitReachedCallback: limitReachedCallback);
     });
   }
 
@@ -89,19 +94,23 @@ class SSEClient {
   /// it will retry indefinitely.
   /// [minRetryTime] is the minimum time to retry
   /// [retryCount] is the current retry count.
+  /// [limitReachedCallback] is a callback function that will be called when the
+  /// maximum number of retries is reached.
   ///
   /// Returns a [Stream] of [SSEModel] representing the SSE events.
-  static Stream<SSEModel> subscribeToSSE(
-      {required SSERequestType method,
-      required String url,
-      required Map<String, String> header,
-      StreamController<SSEModel>? oldStreamController,
-      http.Client? client,
-      Map<String, dynamic>? body,
-      int maxRetryTime = 5000,
-      int minRetryTime = 5000,
-      int maxRetry = 5,
-      int retryCount = 0}) {
+  static Stream<SSEModel> subscribeToSSE({
+    required SSERequestType method,
+    required String url,
+    required Map<String, String> header,
+    StreamController<SSEModel>? oldStreamController,
+    http.Client? client,
+    Map<String, dynamic>? body,
+    int maxRetryTime = 5000,
+    int minRetryTime = 5000,
+    int maxRetry = 5,
+    int retryCount = 0,
+    Future Function()? limitReachedCallback,
+  }) {
     StreamController<SSEModel> streamController = StreamController();
     if (oldStreamController != null) {
       streamController = oldStreamController;
@@ -131,6 +140,23 @@ class SSEClient {
 
         /// Listening to the response as a stream
         response.asStream().listen((data) {
+          if (data.statusCode != 200) {
+            _log.severe('---ERROR CODE ${data.statusCode}---');
+            _retryConnection(
+              method: method,
+              url: url,
+              header: header,
+              body: body,
+              streamController: streamController,
+              maxRetryTime: maxRetryTime,
+              minRetryTime: minRetryTime,
+              currentRetry: retryCount,
+              maxRetry: maxRetry,
+              limitReachedCallback: limitReachedCallback,
+            );
+            return;
+          }
+
           /// Applying transforms and listening to it
           data.stream
             ..transform(Utf8Decoder()).transform(LineSplitter()).listen(
@@ -183,6 +209,7 @@ class SSEClient {
                       minRetryTime: minRetryTime,
                       currentRetry: retryCount,
                       maxRetry: maxRetry,
+                      limitReachedCallback: limitReachedCallback,
                     );
                 }
               },
@@ -199,6 +226,7 @@ class SSEClient {
                   minRetryTime: minRetryTime,
                   currentRetry: retryCount,
                   maxRetry: maxRetry,
+                  limitReachedCallback: limitReachedCallback,
                 );
               },
             );
@@ -215,6 +243,7 @@ class SSEClient {
             minRetryTime: minRetryTime,
             currentRetry: retryCount,
             maxRetry: maxRetry,
+            limitReachedCallback: limitReachedCallback,
           );
         });
       } catch (e) {
@@ -230,6 +259,7 @@ class SSEClient {
           minRetryTime: minRetryTime,
           currentRetry: retryCount,
           maxRetry: maxRetry,
+          limitReachedCallback: limitReachedCallback,
         );
       }
       return streamController.stream;

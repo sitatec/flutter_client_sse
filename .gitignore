@@ -74,3 +74,6 @@ build/
 !**/ios/**/default.perspectivev3
 
 **/coverage/**
+
+# FVM Version Cache
+.fvm/
